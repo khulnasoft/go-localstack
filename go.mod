@@ -3,13 +3,14 @@ module github.com/elgohr/go-localstack
 go 1.18
 
 require (
-	github.com/Masterminds/semver/v3 v3.2.1
-	github.com/aws/aws-sdk-go v1.45.24
-	github.com/aws/aws-sdk-go-v2 v1.21.1
-	github.com/aws/aws-sdk-go-v2/config v1.18.44
-	github.com/aws/aws-sdk-go-v2/credentials v1.13.42
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.22.1
-	github.com/docker/docker v24.0.6+incompatible
+	github.com/Masterminds/semver/v3 v3.1.1
+	github.com/aws/aws-sdk-go v1.44.47
+	github.com/aws/aws-sdk-go-v2 v1.16.6
+	github.com/aws/aws-sdk-go-v2/config v1.15.12
+	github.com/aws/aws-sdk-go-v2/credentials v1.12.7
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.15.8
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.18.7
+	github.com/docker/docker v20.10.17+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/maxbrunsfeld/counterfeiter/v6 v6.7.0
 	github.com/moby/moby v24.0.6+incompatible

@@ -21,6 +21,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"sync"
+	"time"
+
 	"github.com/Masterminds/semver/v3"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -32,10 +37,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/moby/moby/client"
 	"github.com/sirupsen/logrus"
-	"io"
-	"log"
-	"sync"
-	"time"
 
 	"github.com/elgohr/go-localstack/internal"
 )
@@ -106,6 +107,16 @@ func WithClientFromEnvCtx(ctx context.Context) (InstanceOption, error) {
 	cli.NegotiateAPIVersion(ctx)
 	return func(i *Instance) {
 		i.cli = cli
+	}, nil
+}
+
+// WithVolumeMount configures the instance to use the specified volume mounts.
+func WithVolumeMount(mountPath, hostPath string) (InstanceOption, error) {
+	return func(i *Instance) {
+		if i.volumeMounts == nil {
+			i.volumeMounts = make(map[string]string)
+		}
+		i.volumeMounts[mountPath] = hostPath
 	}, nil
 }
 
@@ -313,6 +324,7 @@ func (i *Instance) startLocalstack(ctx context.Context, services ...Service) err
 			AttachStderr: true,
 		}, &container.HostConfig{
 			PortBindings: pm,
+			Mounts:       i.getVolumeMounts(),
 			AutoRemove:   true,
 		}, nil, nil, "")
 	if err != nil {
@@ -558,6 +570,18 @@ func (i *Instance) writeContainerLogToLogger(ctx context.Context, containerId st
 			i.log.Println(err)
 		}
 	}
+}
+
+func (i *Instance) getVolumeMounts() []mount.Mount {
+	var mounts []mount.Mount
+	for mountPath, localPath := range i.volumeMounts {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: localPath,
+			Target: mountPath,
+		})
+	}
+	return mounts
 }
 
 func logClose(closer io.Closer) {
