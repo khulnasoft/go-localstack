@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,6 +120,16 @@ func WithVolumeMount(mountPath, hostPath string) (InstanceOption, error) {
 		}
 		i.volumeMounts[mountPath] = hostPath
 	}, nil
+}
+
+func WithInitScriptMount(initScriptDirPath string, completeLogLine string) InstanceOption {
+	return func(i *Instance) {
+		if i.volumeMounts == nil {
+			i.volumeMounts = make(map[string]string)
+		}
+		i.volumeMounts["/docker-entrypoint-initaws.d"] = initScriptDirPath
+		i.initCompleteLogLine = completeLogLine
+	}
 }
 
 // Semver constraint that tests it the version is affected by the port change.
@@ -466,6 +478,10 @@ func (i *Instance) isRunning(ctx context.Context) error {
 }
 
 func (i *Instance) checkAvailable(ctx context.Context) error {
+	if i.initCompleteLogLine != "" && !i.isInitComplete(ctx) {
+		return fmt.Errorf("init not complete, waiting for init complete log line")
+	}
+
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion("us-east-1"),
 		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(_, _ string, _ ...interface{}) (aws.Endpoint, error) {
@@ -547,6 +563,25 @@ func containsService(services []Service, service Service) bool {
 		}
 	}
 	return false
+}
+
+func (i *Instance) isInitComplete(ctx context.Context) bool {
+	reader, err := i.cli.ContainerLogs(ctx, i.containerId, types.ContainerLogsOptions{
+		ShowStdout: true,
+		Follow:     false,
+	})
+	if err != nil {
+		i.log.Error(err)
+		return false
+	}
+	defer logClose(reader)
+
+	logContent, err := ioutil.ReadAll(reader)
+	if err != nil {
+		i.log.Error(err)
+		return false
+	}
+	return strings.Contains(string(logContent), i.initCompleteLogLine)
 }
 
 func (i *Instance) writeContainerLogToLogger(ctx context.Context, containerId string) {
