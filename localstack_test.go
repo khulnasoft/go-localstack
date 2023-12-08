@@ -149,7 +149,7 @@ func TestWithLabels(t *testing.T) {
 			defer cancel()
 
 			require.NoError(t, l.StartWithContext(ctx))
-			defer func() { require.NoError(t, l.Stop()) }()
+			t.Cleanup(func() { require.NoError(t, l.Stop()) })
 
 			cli, err := client.NewClientWithOpts()
 			require.NoError(t, err)
@@ -198,9 +198,9 @@ func TestLocalStack(t *testing.T) {
 		t.Run(s.name, func(t *testing.T) {
 			l, err := localstack.NewInstance(s.input...)
 			require.NoError(t, err)
-			defer func() {
-				require.NoError(t, l.Stop())
-			}()
+			t.Cleanup(func() {
+				assert.NoError(t, l.Stop())
+			})
 			require.NoError(t, l.Start())
 			s.expect(t, l)
 		})
@@ -304,9 +304,9 @@ func TestLocalStackWithIndividualServices(t *testing.T) {
 func TestInstanceStartedTwiceWithoutLeaking(t *testing.T) {
 	l, err := localstack.NewInstance()
 	require.NoError(t, err)
-	defer func() {
+	t.Cleanup(func() {
 		require.NoError(t, l.Stop())
-	}()
+	})
 	require.NoError(t, l.Start())
 	firstInstance := l.Endpoint(localstack.S3)
 	require.NoError(t, l.Start())

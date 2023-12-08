@@ -387,13 +387,12 @@ func (i *Instance) mapPorts(ctx context.Context, services []Service, containerId
 			time.Sleep(300 * time.Millisecond)
 			return i.mapPorts(ctx, services, containerId, try+1)
 		}
-		i.portMappingMutex.Lock()
-		defer i.portMappingMutex.Unlock()
-		i.portMapping[FixedPort] = "localhost:" + bindings[0].HostPort
+		i.savePortMappings(map[Service]string{
+			FixedPort: "localhost:" + bindings[0].HostPort,
+		})
 	} else {
 		hasFilteredServices := len(services) > 0
-		i.portMappingMutex.Lock()
-		defer i.portMappingMutex.Unlock()
+		newMapping := make(map[Service]string, len(AvailableServices))
 		for service := range AvailableServices {
 			bindings := ports[nat.Port(service.Port)]
 			if len(bindings) == 0 {
@@ -401,11 +400,12 @@ func (i *Instance) mapPorts(ctx context.Context, services []Service, containerId
 				return i.mapPorts(ctx, services, containerId, try+1)
 			}
 			if hasFilteredServices && containsService(services, service) {
-				i.portMapping[service] = "localhost:" + bindings[0].HostPort
+				newMapping[service] = "localhost:" + bindings[0].HostPort
 			} else if !hasFilteredServices {
-				i.portMapping[service] = "localhost:" + bindings[0].HostPort
+				newMapping[service] = "localhost:" + bindings[0].HostPort
 			}
 		}
+		i.savePortMappings(newMapping)
 	}
 	return nil
 }
@@ -432,7 +432,7 @@ func (i *Instance) waitToBeAvailable(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := i.isRunning(ctx, 0); err != nil {
+			if err := i.isRunning(ctx); err != nil {
 				return err
 			}
 			if err := i.checkAvailable(ctx); err != nil {
@@ -445,21 +445,13 @@ func (i *Instance) waitToBeAvailable(ctx context.Context) error {
 	}
 }
 
-func (i *Instance) isRunning(ctx context.Context, try int) error {
-	if try > 10 {
+func (i *Instance) isRunning(ctx context.Context) error {
+	_, err := i.cli.ContainerInspect(ctx, i.getContainerId())
+	if err != nil {
+		i.log.Debug(err)
 		return errors.New("localstack container has been stopped")
 	}
-	containers, err := i.cli.ContainerList(ctx, types.ContainerListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, c := range containers {
-		if c.Image == imageName {
-			return nil
-		}
-	}
-	time.Sleep(300 * time.Millisecond)
-	return i.isRunning(ctx, try+1)
+	return nil
 }
 
 func (i *Instance) checkAvailable(ctx context.Context) error {
@@ -519,9 +511,13 @@ func (i *Instance) setContainerId(v string) {
 }
 
 func (i *Instance) resetPortMapping() {
+	i.savePortMappings(map[Service]string{})
+}
+
+func (i *Instance) savePortMappings(newMapping map[Service]string) {
 	i.portMappingMutex.Lock()
 	defer i.portMappingMutex.Unlock()
-	i.portMapping = map[Service]string{}
+	i.portMapping = newMapping
 }
 
 func (i *Instance) getPortMapping(service Service) string {
