@@ -33,7 +33,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/client"
 	"github.com/elgohr/go-localstack"
+	log "github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -417,6 +427,39 @@ func TestWithClientFromEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWithInitScript(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+
+	initScriptsOpt, err := localstack.WithInitScriptMount("testdata/init-scripts", "Bootstrap Complete")
+	require.NoError(t, err)
+
+	l, err := localstack.NewInstance(initScriptsOpt)
+	require.NoError(t, err)
+	err = l.StartWithContext(ctx, localstack.SQS)
+	require.NoError(t, err)
+
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion("eu-west-1"),
+		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(_, _ string, _ ...interface{}) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				PartitionID:       "aws",
+				URL:               l.EndpointV2(localstack.SQS),
+				SigningRegion:     "eu-west-1",
+				HostnameImmutable: true,
+			}, nil
+		})),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("dummy", "dummy", "dummy")),
+	)
+	require.NoError(t, err)
+
+	sqsSvc := sqs.NewFromConfig(cfg)
+	// check we have the 2 expected queues
+	queues, err := sqsSvc.ListQueues(ctx, &sqs.ListQueuesInput{})
+	require.NoError(t, err)
+	require.Len(t, queues.QueueUrls, 2)
+	cancel()
 }
 
 func havingOneEndpoint(t *testing.T, l *localstack.Instance) {

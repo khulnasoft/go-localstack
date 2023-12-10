@@ -21,6 +21,14 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/Masterminds/semver/v3"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -32,10 +40,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/moby/moby/client"
 	"github.com/sirupsen/logrus"
-	"io"
-	"log"
-	"sync"
-	"time"
 
 	"github.com/elgohr/go-localstack/internal"
 )
@@ -107,6 +111,37 @@ func WithClientFromEnvCtx(ctx context.Context) (InstanceOption, error) {
 	return func(i *Instance) {
 		i.cli = cli
 	}, nil
+}
+
+// WithVolumeMount configures the instance to use the specified volume mounts.
+func WithVolumeMount(mountPath, hostPath string) (InstanceOption, error) {
+	return func(i *Instance) {
+		if i.volumeMounts == nil {
+			i.volumeMounts = make(map[string]string)
+		}
+		i.volumeMounts[mountPath] = hostPath
+	}, nil
+}
+
+// WithInitScriptMount configures the instance with init scripts and waits for a specific line from
+// the script to show as ready to continue
+func WithInitScriptMount(initScriptDirPath string, completeLogLine string) (InstanceOption, error) {
+	if completeLogLine == "" {
+		return nil, fmt.Errorf("init script mount requires a line to wait for in the init script for completion")
+	}
+
+	initScriptDirPathAbs, err := filepath.Abs(initScriptDirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(i *Instance) {
+		if i.volumeMounts == nil {
+			i.volumeMounts = make(map[string]string)
+		}
+		i.volumeMounts["/docker-entrypoint-initaws.d"] = initScriptDirPathAbs
+		i.initCompleteLogLine = completeLogLine
+	}, err
 }
 
 // Semver constraint that tests it the version is affected by the port change.
@@ -313,6 +348,7 @@ func (i *Instance) startLocalstack(ctx context.Context, services ...Service) err
 			AttachStderr: true,
 		}, &container.HostConfig{
 			PortBindings: pm,
+			Mounts:       i.getVolumeMounts(),
 			AutoRemove:   true,
 		}, nil, nil, "")
 	if err != nil {
@@ -463,6 +499,10 @@ func (i *Instance) isRunning(ctx context.Context, try int) error {
 }
 
 func (i *Instance) checkAvailable(ctx context.Context) error {
+	if i.initCompleteLogLine != "" && !i.isInitComplete(ctx) {
+		return fmt.Errorf("init not complete, waiting for init complete log line")
+	}
+
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion("us-east-1"),
 		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(_, _ string, _ ...interface{}) (aws.Endpoint, error) {
@@ -546,6 +586,25 @@ func containsService(services []Service, service Service) bool {
 	return false
 }
 
+func (i *Instance) isInitComplete(ctx context.Context) bool {
+	reader, err := i.cli.ContainerLogs(ctx, i.containerId, types.ContainerLogsOptions{
+		ShowStdout: true,
+		Follow:     false,
+	})
+	if err != nil {
+		i.log.Error(err)
+		return false
+	}
+	defer logClose(reader)
+
+	logContent, err := ioutil.ReadAll(reader)
+	if err != nil {
+		i.log.Error(err)
+		return false
+	}
+	return strings.Contains(string(logContent), i.initCompleteLogLine)
+}
+
 func (i *Instance) writeContainerLogToLogger(ctx context.Context, containerId string) {
 	reader, err := i.cli.ContainerLogs(ctx, containerId, types.ContainerLogsOptions{
 		ShowStdout: true,
@@ -567,6 +626,18 @@ func (i *Instance) writeContainerLogToLogger(ctx context.Context, containerId st
 			i.log.Println(err)
 		}
 	}
+}
+
+func (i *Instance) getVolumeMounts() []mount.Mount {
+	var mounts []mount.Mount
+	for mountPath, localPath := range i.volumeMounts {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: localPath,
+			Target: mountPath,
+		})
+	}
+	return mounts
 }
 
 func logClose(closer io.Closer) {
