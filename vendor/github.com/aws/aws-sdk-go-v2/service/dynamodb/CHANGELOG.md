@@ -1,3 +1,31 @@
+# v1.27.0 (2024-01-19)
+
+* **Feature**: This release adds support for including ApproximateCreationDateTimePrecision configurations in EnableKinesisStreamingDestination API, adds the same as an optional field in the response of DescribeKinesisStreamingDestination, and adds support for a new UpdateKinesisStreamingDestination API.
+
+# v1.26.9 (2024-01-17)
+
+* **Documentation**: Updating note for enabling streams for UpdateTable.
+
+# v1.26.8 (2024-01-04)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.26.7 (2023-12-20)
+
+* No change notes available for this release.
+
+# v1.26.6 (2023-12-08)
+
+* **Bug Fix**: Reinstate presence of default Retryer in functional options, but still respect max attempts set therein.
+
+# v1.26.5 (2023-12-07)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.26.4 (2023-12-06)
+
+* **Bug Fix**: Restore pre-refactor auth behavior where all operations could technically be performed anonymously.
+
 # v1.26.3 (2023-12-01)
 
 * **Bug Fix**: Correct wrapping of errors in authentication workflow.
