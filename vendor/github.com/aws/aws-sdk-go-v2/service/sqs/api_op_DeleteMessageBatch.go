@@ -4,6 +4,7 @@ package sqs
 
 import (
 	"context"
+	"fmt"
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
@@ -12,14 +13,10 @@ import (
 )
 
 // Deletes up to ten messages from the specified queue. This is a batch version of
-// DeleteMessage. The result of the action on each message is reported individually
-// in the response. Because the batch request can result in a combination of
-// successful and unsuccessful actions, you should check for batch errors even when
-// the call returns an HTTP status code of 200. Some actions take lists of
-// parameters. These lists are specified using the param.n notation. Values of n
-// are integers starting from 1. For example, a parameter list with two elements
-// looks like this: &AttributeName.1=first
-//     &AttributeName.2=second
+// DeleteMessage . The result of the action on each message is reported
+// individually in the response. Because the batch request can result in a
+// combination of successful and unsuccessful actions, you should check for batch
+// errors even when the call returns an HTTP status code of 200 .
 func (c *Client) DeleteMessageBatch(ctx context.Context, params *DeleteMessageBatchInput, optFns ...func(*Options)) (*DeleteMessageBatchOutput, error) {
 	if params == nil {
 		params = &DeleteMessageBatchInput{}
@@ -35,10 +32,9 @@ func (c *Client) DeleteMessageBatch(ctx context.Context, params *DeleteMessageBa
 	return out, nil
 }
 
-//
 type DeleteMessageBatchInput struct {
 
-	// A list of receipt handles for the messages to be deleted.
+	// Lists the receipt handles for the messages to be deleted.
 	//
 	// This member is required.
 	Entries []types.DeleteMessageBatchRequestEntry
@@ -74,12 +70,22 @@ type DeleteMessageBatchOutput struct {
 }
 
 func (c *Client) addOperationDeleteMessageBatchMiddlewares(stack *middleware.Stack, options Options) (err error) {
-	err = stack.Serialize.Add(&awsAwsquery_serializeOpDeleteMessageBatch{}, middleware.After)
+	if err := stack.Serialize.Add(&setOperationInputMiddleware{}, middleware.After); err != nil {
+		return err
+	}
+	err = stack.Serialize.Add(&awsAwsjson10_serializeOpDeleteMessageBatch{}, middleware.After)
 	if err != nil {
 		return err
 	}
-	err = stack.Deserialize.Add(&awsAwsquery_deserializeOpDeleteMessageBatch{}, middleware.After)
+	err = stack.Deserialize.Add(&awsAwsjson10_deserializeOpDeleteMessageBatch{}, middleware.After)
 	if err != nil {
+		return err
+	}
+	if err := addProtocolFinalizerMiddlewares(stack, options, "DeleteMessageBatch"); err != nil {
+		return fmt.Errorf("add protocol finalizers: %v", err)
+	}
+
+	if err = addlegacyEndpointContextSetter(stack, options); err != nil {
 		return err
 	}
 	if err = addSetLoggerMiddleware(stack, options); err != nil {
@@ -100,16 +106,13 @@ func (c *Client) addOperationDeleteMessageBatchMiddlewares(stack *middleware.Sta
 	if err = addRetryMiddlewares(stack, options); err != nil {
 		return err
 	}
-	if err = addHTTPSignerV4Middleware(stack, options); err != nil {
-		return err
-	}
 	if err = awsmiddleware.AddRawResponseToMetadata(stack); err != nil {
 		return err
 	}
 	if err = awsmiddleware.AddRecordResponseTiming(stack); err != nil {
 		return err
 	}
-	if err = addClientUserAgent(stack); err != nil {
+	if err = addClientUserAgent(stack, options); err != nil {
 		return err
 	}
 	if err = smithyhttp.AddErrorCloseResponseBodyMiddleware(stack); err != nil {
@@ -118,10 +121,16 @@ func (c *Client) addOperationDeleteMessageBatchMiddlewares(stack *middleware.Sta
 	if err = smithyhttp.AddCloseResponseBodyMiddleware(stack); err != nil {
 		return err
 	}
+	if err = addSetLegacyContextSigningOptionsMiddleware(stack); err != nil {
+		return err
+	}
 	if err = addOpDeleteMessageBatchValidationMiddleware(stack); err != nil {
 		return err
 	}
 	if err = stack.Initialize.Add(newServiceMetadataMiddleware_opDeleteMessageBatch(options.Region), middleware.Before); err != nil {
+		return err
+	}
+	if err = awsmiddleware.AddRecursionDetection(stack); err != nil {
 		return err
 	}
 	if err = addRequestIDRetrieverMiddleware(stack); err != nil {
@@ -133,6 +142,9 @@ func (c *Client) addOperationDeleteMessageBatchMiddlewares(stack *middleware.Sta
 	if err = addRequestResponseLogging(stack, options); err != nil {
 		return err
 	}
+	if err = addDisableHTTPSMiddleware(stack, options); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -140,7 +152,6 @@ func newServiceMetadataMiddleware_opDeleteMessageBatch(region string) *awsmiddle
 	return &awsmiddleware.RegisterServiceMetadata{
 		Region:        region,
 		ServiceID:     ServiceID,
-		SigningName:   "sqs",
 		OperationName: "DeleteMessageBatch",
 	}
 }
