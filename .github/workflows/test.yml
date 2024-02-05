@@ -12,7 +12,7 @@ jobs:
       - name: Test
         run: go test -race -timeout 30m -coverprofile=coverage.txt -covermode=atomic ./...
       - name: Coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           file: coverage.txt
   advanced-security:
