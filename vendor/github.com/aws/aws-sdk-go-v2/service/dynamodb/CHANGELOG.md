@@ -1,3 +1,48 @@
+# v1.29.0 (2024-02-16)
+
+* **Feature**: Add new ClientOptions field to waiter config which allows you to extend the config for operation calls made by waiters.
+
+# v1.28.1 (2024-02-15)
+
+* **Bug Fix**: Correct failure to determine the error type in awsJson services that could occur when errors were modeled with a non-string `code` field.
+
+# v1.28.0 (2024-02-13)
+
+* **Feature**: Bump minimum Go version to 1.20 per our language support policy.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.27.1 (2024-02-02)
+
+* **Documentation**: Any number of users can execute up to 50 concurrent restores (any type of restore) in a given account.
+
+# v1.27.0 (2024-01-19)
+
+* **Feature**: This release adds support for including ApproximateCreationDateTimePrecision configurations in EnableKinesisStreamingDestination API, adds the same as an optional field in the response of DescribeKinesisStreamingDestination, and adds support for a new UpdateKinesisStreamingDestination API.
+
+# v1.26.9 (2024-01-17)
+
+* **Documentation**: Updating note for enabling streams for UpdateTable.
+
+# v1.26.8 (2024-01-04)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.26.7 (2023-12-20)
+
+* No change notes available for this release.
+
+# v1.26.6 (2023-12-08)
+
+* **Bug Fix**: Reinstate presence of default Retryer in functional options, but still respect max attempts set therein.
+
+# v1.26.5 (2023-12-07)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.26.4 (2023-12-06)
+
+* **Bug Fix**: Restore pre-refactor auth behavior where all operations could technically be performed anonymously.
+
 # v1.26.3 (2023-12-01)
 
 * **Bug Fix**: Correct wrapping of errors in authentication workflow.
