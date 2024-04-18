@@ -302,13 +302,24 @@ func (i *Instance) start(ctx context.Context, services ...Service) error {
 			return fmt.Errorf("localstack: can't stop an already running instance: %w", err)
 		}
 	}
+	return i.startContainer(ctx, services, 0)
+}
 
+func (i *Instance) startContainer(ctx context.Context, services []Service, try int) error {
 	if err := i.startLocalstack(ctx, services...); err != nil {
 		return err
 	}
 
 	i.log.Info("waiting for localstack to start...")
-	return i.waitToBeAvailable(ctx)
+	err := i.waitToBeAvailable(ctx)
+	if errors.As(err, &containerMissing{}) {
+		if try > 3 {
+			return err
+		}
+		i.log.Debugln("missing container retrying")
+		return i.startContainer(ctx, services, try+1)
+	}
+	return err
 }
 
 const imageName = "go-localstack"
@@ -355,11 +366,11 @@ func (i *Instance) startLocalstack(ctx context.Context, services ...Service) err
 		return fmt.Errorf("localstack: could not create container: %w", err)
 	}
 
-	i.setContainerId(resp.ID)
+	containerId := resp.ID
+	i.setContainerId(containerId)
 
 	i.log.Info("starting localstack")
-	containerId := resp.ID
-	if err := i.cli.ContainerStart(ctx, containerId, types.ContainerStartOptions{}); err != nil {
+	if err := i.cli.ContainerStart(ctx, containerId, container.StartOptions{}); err != nil {
 		return fmt.Errorf("localstack: could not start container: %w", err)
 	}
 
@@ -423,13 +434,12 @@ func (i *Instance) mapPorts(ctx context.Context, services []Service, containerId
 			time.Sleep(300 * time.Millisecond)
 			return i.mapPorts(ctx, services, containerId, try+1)
 		}
-		i.portMappingMutex.Lock()
-		defer i.portMappingMutex.Unlock()
-		i.portMapping[FixedPort] = "localhost:" + bindings[0].HostPort
+		i.savePortMappings(map[Service]string{
+			FixedPort: "localhost:" + bindings[0].HostPort,
+		})
 	} else {
 		hasFilteredServices := len(services) > 0
-		i.portMappingMutex.Lock()
-		defer i.portMappingMutex.Unlock()
+		newMapping := make(map[Service]string, len(AvailableServices))
 		for service := range AvailableServices {
 			bindings := ports[nat.Port(service.Port)]
 			if len(bindings) == 0 {
@@ -437,39 +447,42 @@ func (i *Instance) mapPorts(ctx context.Context, services []Service, containerId
 				return i.mapPorts(ctx, services, containerId, try+1)
 			}
 			if hasFilteredServices && containsService(services, service) {
-				i.portMapping[service] = "localhost:" + bindings[0].HostPort
+				newMapping[service] = "localhost:" + bindings[0].HostPort
 			} else if !hasFilteredServices {
-				i.portMapping[service] = "localhost:" + bindings[0].HostPort
+				newMapping[service] = "localhost:" + bindings[0].HostPort
 			}
 		}
+		i.savePortMappings(newMapping)
 	}
 	return nil
 }
 
 func (i *Instance) stop() error {
-	containerId := i.getContainerId()
-	if containerId == "" {
+	i.containerIdMutex.Lock()
+	defer i.containerIdMutex.Unlock()
+	if i.containerId == "" {
 		return nil
 	}
-	timeout := int(time.Second.Seconds())
-	if err := i.cli.ContainerStop(context.Background(), containerId, container.StopOptions{Timeout: &timeout}); err != nil {
+	if err := i.cli.ContainerStop(context.Background(), i.containerId, container.StopOptions{
+		Signal: "SIGKILL",
+	}); err != nil {
 		return err
 	}
-	i.setContainerId("")
+	i.containerId = ""
 	i.resetPortMapping()
 	return nil
 }
 
 func (i *Instance) waitToBeAvailable(ctx context.Context) error {
-	ticker := time.NewTicker(300 * time.Millisecond)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := i.isRunning(ctx, 0); err != nil {
-				return err
+			if err := i.isRunning(ctx); err != nil {
+				return containerMissing{err: err}
 			}
 			if err := i.checkAvailable(ctx); err != nil {
 				i.log.Debug(err)
@@ -481,21 +494,13 @@ func (i *Instance) waitToBeAvailable(ctx context.Context) error {
 	}
 }
 
-func (i *Instance) isRunning(ctx context.Context, try int) error {
-	if try > 10 {
+func (i *Instance) isRunning(ctx context.Context) error {
+	_, err := i.cli.ContainerInspect(ctx, i.getContainerId())
+	if err != nil {
+		i.log.Debug(err)
 		return errors.New("localstack container has been stopped")
 	}
-	containers, err := i.cli.ContainerList(ctx, types.ContainerListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, c := range containers {
-		if c.Image == imageName {
-			return nil
-		}
-	}
-	time.Sleep(300 * time.Millisecond)
-	return i.isRunning(ctx, try+1)
+	return nil
 }
 
 func (i *Instance) checkAvailable(ctx context.Context) error {
@@ -514,6 +519,9 @@ func (i *Instance) checkAvailable(ctx context.Context) error {
 			}, nil
 		})),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("dummy", "dummy", "dummy")),
+		config.WithRetryer(func() aws.Retryer {
+			return aws.NopRetryer{}
+		}),
 	)
 	if err != nil {
 		return err
@@ -546,22 +554,26 @@ func (i *Instance) isAlreadyRunning() bool {
 	return i.getContainerId() != ""
 }
 
+func (i *Instance) setContainerId(containerId string) {
+	i.containerIdMutex.Lock()
+	defer i.containerIdMutex.Unlock()
+	i.containerId = containerId
+}
+
 func (i *Instance) getContainerId() string {
 	i.containerIdMutex.RLock()
 	defer i.containerIdMutex.RUnlock()
 	return i.containerId
 }
 
-func (i *Instance) setContainerId(v string) {
-	i.containerIdMutex.Lock()
-	defer i.containerIdMutex.Unlock()
-	i.containerId = v
+func (i *Instance) resetPortMapping() {
+	i.savePortMappings(map[Service]string{})
 }
 
-func (i *Instance) resetPortMapping() {
+func (i *Instance) savePortMappings(newMapping map[Service]string) {
 	i.portMappingMutex.Lock()
 	defer i.portMappingMutex.Unlock()
-	i.portMapping = map[Service]string{}
+	i.portMapping = newMapping
 }
 
 func (i *Instance) getPortMapping(service Service) string {
@@ -606,7 +618,7 @@ func (i *Instance) isInitComplete(ctx context.Context) bool {
 }
 
 func (i *Instance) writeContainerLogToLogger(ctx context.Context, containerId string) {
-	reader, err := i.cli.ContainerLogs(ctx, containerId, types.ContainerLogsOptions{
+	reader, err := i.cli.ContainerLogs(ctx, containerId, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
@@ -644,4 +656,12 @@ func logClose(closer io.Closer) {
 	if err := closer.Close(); err != nil {
 		log.Println(err)
 	}
+}
+
+type containerMissing struct {
+	err error
+}
+
+func (c containerMissing) Error() string {
+	return c.err.Error()
 }
